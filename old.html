@@ -235,10 +235,7 @@ async function connect() {
   try {
     setState(null, "SEARCHING…");
     device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { services: [SERVICE_UUID] },
-        { namePrefix: "ESP32" }
-      ],
+      filters: [{ services: [SERVICE_UUID] }],
       optionalServices: [SERVICE_UUID]
     });
     device.addEventListener("gattserverdisconnected", onDisconnected);
@@ -257,7 +254,7 @@ async function connect() {
       return;
     }
     setState("error", "ERROR");
-    log(`${e.name || "Error"}: ${e.message || String(e)}`, "err");
+    log(e.message || String(e), "err");
   }
 }
 
@@ -284,7 +281,7 @@ async function send(text) {
     log(`Sent: ${text}`, "ok");
   } catch (e) {
     setState("error", "WRITE FAILED");
-    log(`${e.name || "Error"}: ${e.message || String(e)}`, "err");
+    log(e.message || String(e), "err");
   }
 }
 
