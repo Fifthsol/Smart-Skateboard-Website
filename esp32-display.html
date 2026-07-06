@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ESP32 Display</title>
+<style>
+  :root {
+    --bg: #101418;
+    --panel: #1a2028;
+    --panel-edge: #2a323d;
+    --ink: #e8edf2;
+    --ink-dim: #8a97a5;
+    --oled: #7fdfff;           /* SSD1306 cyan-white glow */
+    --oled-dim: rgba(127,223,255,.14);
+    --ok: #5ee38a;
+    --err: #ff7a6e;
+    --accent: #7fdfff;
+    font-size: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  main { width: 100%; max-width: 420px; }
+
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 1rem; font-weight: 600; letter-spacing: .08em; }
+  h1 span { color: var(--oled); }
+  #status {
+    font-size: .72rem; letter-spacing: .06em;
+    color: var(--ink-dim);
+    display: flex; align-items: center; gap: 6px;
+  }
+  #dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ink-dim); transition: background .3s, box-shadow .3s;
+  }
+  .connected #dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .error #dot { background: var(--err); box-shadow: 0 0 8px var(--err); }
+
+  /* ---- OLED preview: the signature element ---- */
+  .bezel {
+    background: #06090c;
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+    padding: 18px;
+    box-shadow: inset 0 0 30px rgba(0,0,0,.8);
+  }
+  .oled {
+    aspect-ratio: 2 / 1;              /* 128 x 64 */
+    background: #000;
+    border-radius: 2px;
+    overflow: hidden;
+    display: flex; align-items: center;
+    padding: 6% 4%;
+    position: relative;
+  }
+  .oled::after {                       /* faint scanline texture */
+    content: ""; position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom,
+      transparent 0 2px, rgba(0,0,0,.35) 2px 3px);
+    pointer-events: none;
+  }
+  #preview {
+    color: var(--oled);
+    text-shadow: 0 0 6px var(--oled-dim), 0 0 14px var(--oled-dim);
+    font-size: clamp(18px, 8vw, 34px);
+    font-weight: 700;
+    letter-spacing: .04em;
+    line-height: 1.15;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .oled-label {
+    text-align: center; margin-top: 10px;
+    font-size: .62rem; letter-spacing: .18em; color: #3d4854;
+  }
+
+  /* ---- controls ---- */
+  form { margin-top: 22px; display: flex; gap: 10px; }
+  input[type=text] {
+    flex: 1; min-width: 0;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 8px;
+    color: var(--ink);
+    font: inherit; font-size: 1rem;
+    padding: 12px 14px;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input[type=text]::placeholder { color: var(--ink-dim); }
+
+  button {
+    font: inherit; font-size: .85rem; font-weight: 600;
+    letter-spacing: .05em;
+    border-radius: 8px;
+    padding: 12px 18px;
+    cursor: pointer;
+    border: 1px solid var(--panel-edge);
+    background: var(--panel);
+    color: var(--ink);
+    transition: transform .06s;
+  }
+  button:active { transform: scale(.97); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: .4; cursor: default; }
+
+  #connectBtn {
+    width: 100%; margin-top: 22px;
+    background: var(--oled); color: #06090c;
+    border: none; padding: 14px;
+  }
+  .connected #connectBtn { background: var(--panel); color: var(--ink); border: 1px solid var(--panel-edge); }
+  #sendBtn { background: var(--oled); color: #06090c; border: none; }
+
+  .quick {
+    margin-top: 14px;
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .quick button { font-size: .78rem; padding: 8px 12px; color: var(--ink-dim); }
+  .quick button:hover { color: var(--ink); }
+
+  #log {
+    margin-top: 20px;
+    font-size: .72rem; line-height: 1.7;
+    color: var(--ink-dim);
+    max-height: 7.5em; overflow-y: auto;
+  }
+  #log .err { color: var(--err); }
+  #log .ok { color: var(--ok); }
+
+  .notice {
+    margin-top: 18px;
+    font-size: .74rem; line-height: 1.6;
+    color: var(--ink-dim);
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: none;
+  }
+  .notice.show { display: block; }
+  .notice b { color: var(--err); font-weight: 600; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<main id="app">
+  <header>
+    <h1>ESP32<span>·</span>DISPLAY</h1>
+    <div id="status"><span id="dot"></span><span id="statusText">DISCONNECTED</span></div>
+  </header>
+
+  <div class="bezel">
+    <div class="oled"><div id="preview">Ready</div></div>
+    <div class="oled-label">SSD1306 · 128 × 64</div>
+  </div>
+
+  <div class="notice" id="noSupport">
+    <b>Web Bluetooth isn't available in this browser.</b><br>
+    On iPhone, open this page in the <b>Bluefy</b> app (App Store).
+    On desktop or Android, use Chrome or Edge.
+  </div>
+
+  <button id="connectBtn">CONNECT</button>
+
+  <form id="sendForm">
+    <input type="text" id="msg" placeholder="Text to display…" autocomplete="off" maxlength="64" disabled>
+    <button type="submit" id="sendBtn" disabled>SEND</button>
+  </form>
+
+  <div class="quick" id="quick">
+    <button type="button" data-msg="Hello!">Hello!</button>
+    <button type="button" data-msg="BRB">BRB</button>
+    <button type="button" data-msg="On a call">On a call</button>
+    <button type="button" data-msg="Come in :)">Come in :)</button>
+  </div>
+
+  <div id="log"></div>
+</main>
+
+<script>
+const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_UUID    = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+const app        = document.getElementById("app");
+const statusText = document.getElementById("statusText");
+const connectBtn = document.getElementById("connectBtn");
+const sendForm   = document.getElementById("sendForm");
+const msgInput   = document.getElementById("msg");
+const sendBtn    = document.getElementById("sendBtn");
+const preview    = document.getElementById("preview");
+const logEl     = document.getElementById("log");
+
+let device = null;
+let characteristic = null;
+
+if (!navigator.bluetooth) {
+  document.getElementById("noSupport").classList.add("show");
+  connectBtn.disabled = true;
+}
+
+function log(text, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+  logEl.prepend(line);
+}
+
+function setState(state, label) {
+  app.classList.remove("connected", "error");
+  if (state) app.classList.add(state);
+  statusText.textContent = label;
+  const on = state === "connected";
+  msgInput.disabled = !on;
+  sendBtn.disabled = !on;
+  connectBtn.textContent = on ? "DISCONNECT" : "CONNECT";
+}
+
+async function connect() {
+  try {
+    setState(null, "SEARCHING…");
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+      optionalServices: [SERVICE_UUID]
+    });
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+
+    setState(null, "CONNECTING…");
+    const server  = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    characteristic = await service.getCharacteristic(CHAR_UUID);
+
+    setState("connected", device.name || "CONNECTED");
+    log(`Connected to ${device.name || "device"}`, "ok");
+    msgInput.focus();
+  } catch (e) {
+    if (e.name === "NotFoundError") {        // user cancelled the picker
+      setState(null, "DISCONNECTED");
+      return;
+    }
+    setState("error", "ERROR");
+    log(e.message || String(e), "err");
+  }
+}
+
+function onDisconnected() {
+  characteristic = null;
+  setState(null, "DISCONNECTED");
+  log("Device disconnected");
+}
+
+function disconnect() {
+  if (device?.gatt?.connected) device.gatt.disconnect();
+}
+
+async function send(text) {
+  if (!characteristic || !text) return;
+  try {
+    const data = new TextEncoder().encode(text);   // UTF-8, matches the sketch
+    if (characteristic.writeValueWithResponse) {
+      await characteristic.writeValueWithResponse(data);
+    } else {
+      await characteristic.writeValue(data);
+    }
+    preview.textContent = text;
+    log(`Sent: ${text}`, "ok");
+  } catch (e) {
+    setState("error", "WRITE FAILED");
+    log(e.message || String(e), "err");
+  }
+}
+
+connectBtn.addEventListener("click", () => {
+  device?.gatt?.connected ? disconnect() : connect();
+});
+
+sendForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = msgInput.value.trim();
+  if (!text) return;
+  send(text);
+  msgInput.value = "";
+});
+
+document.getElementById("quick").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-msg]");
+  if (btn && characteristic) send(btn.dataset.msg);
+});
+</script>
+</body>
+</html>
